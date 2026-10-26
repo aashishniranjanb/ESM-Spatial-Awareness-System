@@ -8,8 +8,8 @@ from app.main import app
 from app.database.session import init_db
 
 @pytest.fixture(autouse=True)
-async def prepare_db():
-    await init_db()
+def prepare_db():
+    asyncio.run(init_db())
 
 
 def test_websocket_ping_pong():
@@ -23,7 +23,7 @@ def test_websocket_ping_pong():
         # Initial SLAM status event
         slam_msg = websocket.receive_json()
         assert slam_msg["event"] == "slam.status"
-        assert slam_msg["payload"]["available"] is False
+        assert "state" in slam_msg["payload"]
 
         # Send ping
         websocket.send_json({"event": "ping", "timestamp": 123456789})

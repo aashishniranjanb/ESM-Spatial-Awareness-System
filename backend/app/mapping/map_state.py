@@ -334,6 +334,9 @@ class PersistentMapState:
                 best_dist = d
         return best
     
+    def get_trajectory_serializable(self) -> List[Dict]:
+        return self.camera_poses[-300:]
+
     def export_map(self) -> Dict:
         return {
             "format": "esm-map-v1",

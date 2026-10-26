@@ -133,6 +133,26 @@ export default function Home() {
         if (mapData.landmarks) {
           setPersistentLandmarks(mapData.landmarks);
         }
+        if (mapData.trajectory) {
+          setCameraTrajectory(
+            mapData.trajectory.map((t) => ({
+              frame_id: t.frame_id,
+              timestamp_ms: t.timestamp_ms,
+              position: t.position,
+              tracking_state: "tracking",
+              source: "opencv_visual_odometry",
+            }))
+          );
+        }
+        if (mapData.slam_status) {
+          setSlamStatus((prev) => ({
+            ...prev,
+            state: mapData.slam_status!.state,
+            engine_name: mapData.slam_status!.engine_name,
+            available: true,
+            fps: mapData.slam_status!.fps,
+          }));
+        }
       }
     );
     ws.connect();

@@ -34,6 +34,9 @@ export type SLAMStatusPayload = {
   engine_name: string;
   available: boolean;
   message?: string;
+  fps?: number;
+  num_points?: number;
+  scale_available?: boolean;
 };
 
 export type LandmarkPayload = {
@@ -56,6 +59,12 @@ export type LandmarkPayload = {
 export type MapUpdatePayload = {
   landmarks: LandmarkPayload[];
   active_tracks: any[];
+  trajectory?: Array<{
+    frame_id: number;
+    timestamp_ms: number;
+    position?: [number, number, number];
+    rotation_quat?: [number, number, number, number];
+  }>;
   map_status: {
     session_id: string;
     total_landmarks: number;
@@ -65,6 +74,13 @@ export type MapUpdatePayload = {
     active_object_tracks: number;
     camera_pose_count: number;
     current_frame_id: number;
+  };
+  slam_status?: {
+    state: string;
+    engine_name: string;
+    fps?: number;
+    num_points?: number;
+    scale_available?: boolean;
   };
 };
 

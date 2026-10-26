@@ -21,6 +21,7 @@ from app.vision.association import SensorVisionAssociationEngine
 from app.database.session import AsyncSessionLocal
 from app.mapping.map_state import PersistentMapState
 from app.mapping.slam_interface import UnavailableSLAMBackend
+from app.mapping.opencv_slam import OpenCVVisualSLAMBackend
 
 logger = logging.getLogger("esm.ws_router")
 router = APIRouter(tags=["websocket"])
@@ -31,8 +32,9 @@ session_pipelines: Dict[str, SpatialPipeline] = {}
 # Persistent map states per session
 session_maps: Dict[str, PersistentMapState] = {}
 
-# SLAM backend (explicitly reports unavailable)
-slam_backend = UnavailableSLAMBackend()
+# SLAM backend (OpenCV-based genuine visual odometry & tracking)
+slam_backend = OpenCVVisualSLAMBackend()
+slam_backend.initialize()
 
 # Latest sensor sample cache for heuristic association
 latest_sensor_samples: Dict[str, SensorSampleBase] = {}
@@ -112,6 +114,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = "global"):
 
                     # Cache latest valid sample for heuristic vision correlation
                     latest_sensor_samples[msg_session_id] = sample
+
+                    # Update scale in SLAM backend if sample has valid distance
+                    if sample.distance_cm and sample.distance_cm > 10.0:
+                        slam_backend.set_scale(sample.distance_cm / 100.0, source="ultrasonic")
 
                     # Process spatial projection
                     point, filter_reason = pipeline.project_sample(sample)
@@ -326,6 +332,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = "global"):
                             except Exception as ex:
                                 logger.error(f"Error persisting binary frame detections for {session_id}: {ex}")
 
+                    # SLAM frame processing
+                    cam_pose = slam_backend.process_frame(img_bytes, frame_id, ts_ms)
+                    if cam_pose and cam_pose.position:
+                        map_state.add_camera_pose(
+                            frame_id=frame_id,
+                            timestamp_ms=ts_ms,
+                            position=cam_pose.position,
+                            rotation_quat=cam_pose.rotation_quat,
+                            tracking_state=cam_pose.tracking_state.value,
+                            source="opencv_visual_odometry"
+                        )
+
                     # Update persistent map with tracked detections
                     map_state.current_frame_id = frame_id
                     for d in detections:
@@ -344,13 +362,44 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = "global"):
 
                     # Throttled map update broadcast (every 5th frame)
                     if frame_id % 5 == 0:
+                        # Incorporate triangulated SLAM map points into landmarks payload
+                        slam_points = slam_backend.get_map_points()
+                        serialized_landmarks = map_state.get_all_landmarks_serializable()
+                        for sp in slam_points[-30:]:
+                            serialized_landmarks.append({
+                                "id": sp.id,
+                                "x": sp.position[0],
+                                "y": sp.position[1],
+                                "z": sp.position[2],
+                                "label": "Feature Point",
+                                "confidence": 0.75,
+                                "observation_count": sp.num_observations,
+                                "first_observed_frame": sp.last_observed_frame,
+                                "last_observed_frame": sp.last_observed_frame,
+                                "uncertainty": sp.uncertainty,
+                                "provenance": "estimated",
+                                "source": "opencv_slam",
+                                "track_id": None,
+                                "is_stale": False,
+                                "has_valid_depth": True,
+                                "depth_source": "visual_odometry_triangulation"
+                            })
+
                         await ws_manager.broadcast({
                             "event": "map.update",
                             "session_id": session_id,
                             "payload": {
-                                "landmarks": map_state.get_all_landmarks_serializable(),
+                                "landmarks": serialized_landmarks,
                                 "active_tracks": map_state.get_active_tracks_serializable(),
+                                "trajectory": map_state.get_trajectory_serializable(),
                                 "map_status": map_state.get_status(),
+                                "slam_status": {
+                                    "state": slam_backend.get_status().state.value,
+                                    "engine_name": slam_backend.get_status().engine_name,
+                                    "fps": slam_backend.get_status().tracking_fps,
+                                    "num_points": len(slam_backend.get_map_points()),
+                                    "scale_available": slam_backend.get_status().scale_available,
+                                }
                             }
                         }, session_id)
 

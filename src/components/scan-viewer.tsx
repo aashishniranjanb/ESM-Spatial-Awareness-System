@@ -282,7 +282,94 @@ function PointCloud({ points, visible = true }: { points: ScanPoint[]; visible?:
   );
 }
 
-// Persistent 3D Map Landmarks (Rendered ONLY when valid depth exists)
+// 3D Obstacle Bounding Box with wireframe, solid accent base, and telemetry label
+function ObstacleBoundingBox3D({
+  position,
+  size = [0.6, 0.8, 0.6],
+  color = "#EF4444",
+  label = "Obstacle",
+  sublabel,
+  isStale = false,
+  showLabel = true,
+}: {
+  position: [number, number, number];
+  size?: [number, number, number];
+  color?: string;
+  label?: string;
+  sublabel?: string;
+  isStale?: boolean;
+  showLabel?: boolean;
+}) {
+  const [sx, sy, sz] = size;
+  return (
+    <group position={position}>
+      {/* Semi-transparent bounding volume box */}
+      <mesh position={[0, sy / 2, 0]}>
+        <boxGeometry args={[sx, sy, sz]} />
+        <meshStandardMaterial
+          color={color}
+          transparent
+          opacity={isStale ? 0.12 : 0.22}
+          roughness={0.3}
+          metalness={0.1}
+        />
+      </mesh>
+
+      {/* Crisp wireframe box cage */}
+      <mesh position={[0, sy / 2, 0]}>
+        <boxGeometry args={[sx, sy, sz]} />
+        <meshBasicMaterial
+          color={color}
+          wireframe
+          transparent
+          opacity={isStale ? 0.35 : 0.85}
+        />
+      </mesh>
+
+      {/* Floor projection boundary ring */}
+      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[Math.max(sx, sz) * 0.45, Math.max(sx, sz) * 0.55, 24]} />
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={isStale ? 0.25 : 0.6}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      {/* Floating 3D engineering label */}
+      {showLabel && (
+        <Html position={[0, sy + 0.18, 0]} center>
+          <div
+            className="detection-tag"
+            style={{
+              borderColor: color,
+              color: "#F4F7FB",
+              background: "rgba(13, 27, 42, 0.88)",
+              boxShadow: `0 0 8px ${color}44`,
+              opacity: isStale ? 0.5 : 1.0,
+              fontSize: "10px",
+              padding: "2px 7px",
+              borderRadius: "3px",
+              border: `1px solid ${color}`,
+              textAlign: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <strong style={{ display: "block", letterSpacing: "0.5px" }}>{label}</strong>
+            {sublabel && (
+              <span style={{ fontSize: "8.5px", color: "#9FB1C5", display: "block" }}>
+                {sublabel}
+              </span>
+            )}
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+// Persistent 3D Map Landmarks (Rendered with 3D Bounding Boxes)
 function PersistentLandmarks3D({
   landmarks = [],
   visible = true,
@@ -298,49 +385,38 @@ function PersistentLandmarks3D({
         if (!lm.has_valid_depth) return null;
 
         const isStale = lm.is_stale;
+        const isEcho = lm.source === "ultrasonic";
+        const isVO = lm.source === "opencv_slam";
+
+        // Color coding: Critical Red for measured close obstacle, Teal for safe echo, Violet for estimated vision track, Cyan for SLAM feature
         const color =
-          lm.provenance === "measured"
-            ? "#00C2A8"
-            : lm.provenance === "estimated"
-            ? "#B066FE"
-            : "#9FB1C5";
+          isVO
+            ? "#00D1E8"
+            : lm.provenance === "measured"
+            ? (Math.abs(lm.z) < 1.5 ? "#EF4444" : "#00C2A8")
+            : "#B066FE";
+
+        // Size based on obstacle category
+        const boxSize: [number, number, number] =
+          isVO
+            ? [0.12, 0.12, 0.12]
+            : isEcho
+            ? [0.35, 0.45, 0.35]
+            : lm.label?.toLowerCase().includes("person")
+            ? [0.55, 1.6, 0.4]
+            : [0.65, 0.7, 0.65];
 
         return (
-          <group key={lm.id} position={[lm.x, lm.y, lm.z]}>
-            {/* 3D Marker indicator */}
-            <mesh>
-              <sphereGeometry args={[isStale ? 0.08 : 0.12, 12, 12]} />
-              <meshStandardMaterial
-                color={color}
-                transparent
-                opacity={isStale ? 0.35 : 0.85}
-                roughness={0.4}
-              />
-            </mesh>
-            {/* Bounding wireframe around tracked objects */}
-            {lm.track_id !== undefined && (
-              <mesh>
-                <boxGeometry args={[0.35, 0.35, 0.35]} />
-                <meshBasicMaterial color={color} wireframe transparent opacity={isStale ? 0.2 : 0.6} />
-              </mesh>
-            )}
-            <Html position={[0, 0.22, 0]} center>
-              <div
-                className="detection-tag"
-                style={{
-                  opacity: isStale ? 0.45 : 1.0,
-                  borderColor: isStale ? "#555" : undefined,
-                  fontSize: "9px",
-                }}
-              >
-                <span>{lm.label || "Landmark"}</span>
-                <small>
-                  {lm.provenance.toUpperCase()} · {lm.observation_count} obs
-                  {lm.depth_source ? ` (${lm.depth_source.replace(/_/g, " ")})` : ""}
-                </small>
-              </div>
-            </Html>
-          </group>
+          <ObstacleBoundingBox3D
+            key={lm.id}
+            position={[lm.x, lm.y, lm.z]}
+            size={boxSize}
+            color={color}
+            label={lm.label || (isVO ? "SLAM Point" : "Obstacle")}
+            sublabel={`${lm.provenance.toUpperCase()} · ${Math.abs(lm.z).toFixed(2)}m`}
+            isStale={isStale}
+            showLabel={!isVO}
+          />
         );
       })}
     </>
@@ -509,41 +585,37 @@ function ContextEnvironment({
         </mesh>
       </group>
 
-      {/* Demo Mode Pedestrian Obstacle (0.4, 0, -2.8) */}
+      {/* Demo Mode Pedestrian Obstacle with 3D Bounding Box (0.4, 0, -2.8) */}
       {isDemoMode && (
-        <group position={[0.4, 0, -2.8]} rotation={[0, -Math.PI / 4, 0]}>
-          {/* Head */}
-          <mesh position={[0, 1.5, 0]}>
-            <sphereGeometry args={[0.11, 16, 16]} />
-            <meshStandardMaterial color="#D7B19D" />
-          </mesh>
-          {/* Body */}
-          <mesh position={[0, 1.05, 0]}>
-            <boxGeometry args={[0.3, 0.55, 0.18]} />
-            <meshStandardMaterial color="#F5A623" roughness={0.5} />
-          </mesh>
-          {/* Legs */}
-          <mesh position={[-0.08, 0.38, 0]}>
-            <cylinderGeometry args={[0.05, 0.045, 0.75, 12]} />
-            <meshStandardMaterial color="#13263A" />
-          </mesh>
-          <mesh position={[0.08, 0.38, 0]}>
-            <cylinderGeometry args={[0.05, 0.045, 0.75, 12]} />
-            <meshStandardMaterial color="#13263A" />
-          </mesh>
-          <Html position={[0, 1.75, 0]} center>
-            <div
-              className="detection-tag"
-              style={{
-                borderColor: "#F5A623",
-                color: "#FDE68A",
-                background: "rgba(35, 20, 5, 0.9)",
-              }}
-            >
-              <span>PEDESTRIAN (DEMO)</span>
-              <small>~2.8m ahead</small>
-            </div>
-          </Html>
+        <group position={[0.4, 0, -2.8]}>
+          <ObstacleBoundingBox3D
+            position={[0, 0, 0]}
+            size={[0.7, 1.85, 0.6]}
+            color="#EF4444"
+            label="OBSTACLE: PEDESTRIAN"
+            sublabel="PATH INTERSECTION · 2.8m"
+          />
+          <group rotation={[0, -Math.PI / 4, 0]}>
+            {/* Head */}
+            <mesh position={[0, 1.5, 0]}>
+              <sphereGeometry args={[0.11, 16, 16]} />
+              <meshStandardMaterial color="#D7B19D" />
+            </mesh>
+            {/* Body */}
+            <mesh position={[0, 1.05, 0]}>
+              <boxGeometry args={[0.3, 0.55, 0.18]} />
+              <meshStandardMaterial color="#F5A623" roughness={0.5} />
+            </mesh>
+            {/* Legs */}
+            <mesh position={[-0.08, 0.38, 0]}>
+              <cylinderGeometry args={[0.05, 0.045, 0.75, 12]} />
+              <meshStandardMaterial color="#13263A" />
+            </mesh>
+            <mesh position={[0.08, 0.38, 0]}>
+              <cylinderGeometry args={[0.05, 0.045, 0.75, 12]} />
+              <meshStandardMaterial color="#13263A" />
+            </mesh>
+          </group>
         </group>
       )}
     </group>
