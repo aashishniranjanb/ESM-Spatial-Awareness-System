@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing / Production builds
+/coverage
+/.next/
+/out/
+/build
+
+# Misc
+.DS_Store
+*.pem
+*.log
+.env*
+!.env.example
+
+# TypeScript cache
+*.tsbuildinfo
+next-env.d.ts
+
+# Model Weights
+*.pt
+*.onnx
+
+# Python Virtual Environments & DB
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite
+*.sqlite3
+
+# Archives / Local staging
+archive/
